@@ -1,0 +1,85 @@
+TensorFlow 2.0 Upgrade Script
+-----------------------------
+Converted 4 files
+Detected 2 issues that require attention
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+File: yolo-v3/utils.py
+--------------------------------------------------------------------------------
+yolo-v3/utils.py:85:8: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+--------------------------------------------------------------------------------
+File: yolo-v3/load_weights.py
+--------------------------------------------------------------------------------
+yolo-v3/load_weights.py:112:8: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+================================================================================
+Detailed log follows:
+
+================================================================================
+================================================================================
+Input tree: 'yolo-v3/'
+================================================================================
+--------------------------------------------------------------------------------
+Processing file 'yolo-v3/yolo_v3.py'
+ outputting to 'yolo_v3_v2/yolo_v3.py'
+--------------------------------------------------------------------------------
+
+15:11: INFO: Renamed 'tf.layers.batch_normalization' to 'tf.compat.v1.layers.batch_normalization'
+38:24: INFO: Added keywords to args of function 'tf.pad'
+42:24: INFO: Added keywords to args of function 'tf.pad'
+52:11: INFO: Renamed 'tf.layers.conv2d' to 'tf.compat.v1.layers.conv2d'
+195:13: INFO: Renamed 'tf.layers.conv2d' to 'tf.compat.v1.layers.conv2d'
+202:17: INFO: Added keywords to args of function 'tf.transpose'
+223:38: INFO: Changed tf.to_float call to tf.cast(..., dtype=tf.float32).
+238:17: INFO: Added keywords to args of function 'tf.transpose'
+245:13: INFO: Changed tf.image.resize_nearest_neighbor call to tf.image.resize(..., method=tf.image.ResizeMethod.NEAREST_NEIGHBOR).
+248:17: INFO: Added keywords to args of function 'tf.transpose'
+287:16: INFO: Added keywords to args of function 'tf.boolean_mask'
+288:18: INFO: Added keywords to args of function 'tf.argmax'
+289:33: INFO: Changed tf.to_float call to tf.cast(..., dtype=tf.float32).
+297:30: INFO: Added keywords to args of function 'tf.boolean_mask'
+356:13: INFO: Renamed 'tf.variable_scope' to 'tf.compat.v1.variable_scope'
+358:25: INFO: Added keywords to args of function 'tf.transpose'
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'yolo-v3/utils.py'
+ outputting to 'yolo_v3_v2/utils.py'
+--------------------------------------------------------------------------------
+
+85:8: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'yolo-v3/load_weights.py'
+ outputting to 'yolo_v3_v2/load_weights.py'
+--------------------------------------------------------------------------------
+
+39:34: INFO: Renamed 'tf.assign' to 'tf.compat.v1.assign'
+47:30: INFO: Renamed 'tf.assign' to 'tf.compat.v1.assign'
+66:38: INFO: Renamed 'tf.assign' to 'tf.compat.v1.assign'
+74:34: INFO: Renamed 'tf.assign' to 'tf.compat.v1.assign'
+81:30: INFO: Renamed 'tf.assign' to 'tf.compat.v1.assign'
+90:30: INFO: Renamed 'tf.assign' to 'tf.compat.v1.assign'
+101:13: INFO: Renamed 'tf.placeholder' to 'tf.compat.v1.placeholder'
+105:17: INFO: Renamed 'tf.global_variables' to 'tf.compat.v1.global_variables'
+108:12: INFO: Renamed 'tf.train.Saver' to 'tf.compat.v1.train.Saver'
+108:27: INFO: Renamed 'tf.global_variables' to 'tf.compat.v1.global_variables'
+110:9: INFO: Renamed 'tf.Session' to 'tf.compat.v1.Session'
+112:8: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'yolo-v3/detect.py'
+ outputting to 'yolo_v3_v2/detect.py'
+--------------------------------------------------------------------------------
+
+39:17: INFO: Renamed 'tf.placeholder' to 'tf.compat.v1.placeholder'
+41:16: INFO: Renamed 'tf.train.Saver' to 'tf.compat.v1.train.Saver'
+41:31: INFO: Renamed 'tf.global_variables' to 'tf.compat.v1.global_variables'
+43:13: INFO: Renamed 'tf.Session' to 'tf.compat.v1.Session'
+52:17: INFO: Renamed 'tf.placeholder' to 'tf.compat.v1.placeholder'
+54:16: INFO: Renamed 'tf.train.Saver' to 'tf.compat.v1.train.Saver'
+54:31: INFO: Renamed 'tf.global_variables' to 'tf.compat.v1.global_variables'
+56:13: INFO: Renamed 'tf.Session' to 'tf.compat.v1.Session'
+--------------------------------------------------------------------------------
+
