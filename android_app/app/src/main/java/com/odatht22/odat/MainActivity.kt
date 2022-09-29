@@ -41,14 +41,15 @@ import java.nio.ByteBuffer
 import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-
+import java.util.concurrent.TimeUnit
 
 
 /*
 This activity provides an interface to access a connected DJI Product's camera and use
 it to take photos and record videos
 */
-class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, View.OnClickListener, ObjectDetectorHelper.DetectorListener {
+class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, View.OnClickListener,
+    ObjectDetectorHelper.DetectorListener {
 
     // Class Variables
     private val TAG = MainActivity::class.java.name
@@ -56,7 +57,7 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
     // listener that is used to receive video data coming from the connected DJI product
     private var receivedVideoDataListener: VideoFeeder.VideoDataListener? = null
     private var codecManager: DJICodecManager? =
-            null // handles the encoding and decoding of video data
+        null // handles the encoding and decoding of video data
 
     private lateinit var videoSurface:
             TextureView // Used to display the DJI product's camera video stream
@@ -70,7 +71,7 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
     // Object detection variables
 
     private lateinit var objectDetectionHelper: ObjectDetectorHelper
-
+    private var shouldDetectObjects: Boolean = false
     private lateinit var cameraExecutor: ExecutorService
 
 
@@ -82,14 +83,11 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         // Wait for the views to be properly laid out
 
 
-
-
     }
 
     override fun onError(error: String) {
         Toast.makeText(this, error, Toast.LENGTH_SHORT).show()
     }
-
 
 
     // Creating the Activity
@@ -103,10 +101,12 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
                 or View.SYSTEM_UI_FLAG_FULLSCREEN
                 or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
 
-        window.setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
-            WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_FULLSCREEN,
+            WindowManager.LayoutParams.FLAG_FULLSCREEN
+        );
         setContentView(
-                R.layout.activity_main
+            R.layout.activity_main
         ) // inflating the activity_main.xml layout as the activity's view
 
         supportActionBar?.hide() // Hide app name bar
@@ -117,10 +117,9 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         It then sends this data to the codec manager for decoding.
         */
         receivedVideoDataListener =
-                VideoFeeder.VideoDataListener { videoBuffer, size ->
-                    codecManager?.sendDataToDecoder(videoBuffer, size)
-                }
-
+            VideoFeeder.VideoDataListener { videoBuffer, size ->
+                codecManager?.sendDataToDecoder(videoBuffer, size)
+            }
 
 
         /*
@@ -167,11 +166,7 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         objectDetectionHelper = ObjectDetectorHelper(context = this, objectDetectorListener = this)
 
 
-
-
-
     }
-
 
 
     // Function to initialize the activity's UI elements
@@ -190,7 +185,6 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         The videoSurface will then display the surface texture, which in this case is a camera video stream.
         */
         videoSurface.surfaceTextureListener = this
-
 
 
         // Giving the non-toggle button elements a click listener
@@ -217,7 +211,7 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
     // Function to make the DJI drone's camera start video recording
     private fun startRecord() {
         val camera =
-                getCameraInstance() ?: return // get camera instance or null if it doesn't exist
+            getCameraInstance() ?: return // get camera instance or null if it doesn't exist
 
         /*
         starts the camera video recording and receives a callback. If the callback returns an error that
@@ -235,7 +229,7 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
     // Function to make the DJI product's camera stop video recording
     private fun stopRecord() {
         val camera =
-                getCameraInstance() ?: return // get camera instance or null if it doesn't exist
+            getCameraInstance() ?: return // get camera instance or null if it doesn't exist
 
         /*
         stops the camera video recording and receives a callback. If the callback returns an error that
@@ -274,21 +268,32 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         }
     }
 
-    private fun startObjectDetection(){
+    private fun startObjectDetection() {
 
+        cameraExecutor.execute {
+            while (true) {
 
-        for (i in 1..1000){
+                if (!shouldDetectObjects) {
 
+                    val overlay: OverlayView = findViewById(R.id.overlay)
 
-                cameraExecutor.execute {
-                    getImageData()?.let {
-
-                        detectObjects(
-                            it
-                        )
-
-                    }
+                    overlay.clearResults()
+                    overlay.clear()
+                    overlay.invalidate()
+                    break
                 }
+
+
+                getImageData()?.let {
+
+                    detectObjects(
+                        it
+                    )
+
+                    it.recycle()
+
+                }
+            }
 
 
         }
@@ -306,14 +311,13 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         runOnUiThread {
 
 
-
             val textView: TextView = findViewById<TextView>(R.id.inference_time_val)
             textView.text = String.format("%d ms", inferenceTime)
 
             // Pass necessary information to OverlayView for drawing on the canvas
             val overlay: OverlayView = findViewById(R.id.overlay)
             //Log.i(TAG, "results: $results")
-            results?.removeIf{detection -> detection.categories[0].label != "person"}
+            results?.removeIf { detection -> detection.categories[0].label != "person" }
             overlay.setResults(
                 results ?: LinkedList<Detection>(),
                 imageHeight,
@@ -393,8 +397,30 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
             // }
 
             R.id.inference_button -> {
-                Log.i(TAG, "Starting inference process")
-                startObjectDetection()
+
+
+                shouldDetectObjects = !shouldDetectObjects
+                when (shouldDetectObjects) {
+
+                    true -> {
+                        Log.i(TAG, "Starting inference process")
+                        detectBtn.text = "Stop"
+                        startObjectDetection()
+
+                    }
+                    false -> {
+                        Log.i(TAG, "Stopping inference process")
+                        detectBtn.text = "Detect"
+                        val overlay: OverlayView = findViewById(R.id.overlay)
+
+                        overlay.clearResults()
+                        overlay.invalidate()
+
+
+                    }
+
+                }
+
             }
             R.id.LandBtn -> {
                 (getProductInstance() as Aircraft).flightController?.let { flightController ->
@@ -501,66 +527,62 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         return isCameraModuleAvailable() && (getProductInstance()?.camera?.playbackManager != null)
     }
 
-    private fun getImageData() :Bitmap? {
+    private fun getImageData(): Bitmap? {
+
+
+        val videoWidth: Int? = codecManager?.videoWidth
+        val videoHeight: Int? = codecManager?.videoHeight
+        if (videoWidth == null || videoHeight == null) {
+            return null
+        }
+        val imageData: ByteArray = codecManager?.getRgbaData(videoWidth, videoHeight) ?: return null
+        val bmp: Bitmap = Bitmap.createBitmap(videoWidth, videoHeight, Bitmap.Config.ARGB_8888)
+        val buffer: ByteBuffer = ByteBuffer.wrap(imageData)
+        bmp.copyPixelsFromBuffer(buffer)
+        val size: Int = 10
+        return bmp
+        //saveImage(bmp, this@MainActivity, "ODaT")
+
+
+        /**
+         * launch {
+        // val pixels = IntArray(bmp.width * bmp.height)
+        val pixels = IntArray(size * size)
+        val pix = IntArray(videoWidth * videoHeight)
+        bmp.getPixels(pix, 0, videoWidth, 0, 0, videoWidth, videoHeight)
 
 
 
-            val videoWidth: Int? = codecManager?.videoWidth
-            val videoHeight: Int? = codecManager?.videoHeight
-            if (videoWidth == null || videoHeight == null) {
-                return null
-            }
-            val imageData: ByteArray = codecManager?.getRgbaData(videoWidth, videoHeight) ?: return null
-            val bmp: Bitmap = Bitmap.createBitmap(videoWidth, videoHeight, Bitmap.Config.ARGB_8888)
-            val buffer: ByteBuffer = ByteBuffer.wrap(imageData)
-            bmp.copyPixelsFromBuffer(buffer)
-            val size: Int = 10
-            return bmp
-            //saveImage(bmp, this@MainActivity, "ODaT")
-
-
-            /**
-             * launch {
-            // val pixels = IntArray(bmp.width * bmp.height)
-            val pixels = IntArray(size * size)
-            val pix = IntArray(videoWidth * videoHeight)
-            bmp.getPixels(pix, 0, videoWidth, 0, 0, videoWidth, videoHeight)
+        val imagePixelData = Matrix3D(videoWidth, videoHeight, 3)
 
 
 
-            val imagePixelData = Matrix3D(videoWidth, videoHeight, 3)
+        var R: Int
+        var G: Int
+        var B: Int
+        var Y: Int
+
+        for (y in 0 until videoHeight) {
+        for (x in 0 until videoWidth) {
+        val index: Int = y * videoWidth + x
+        R = pix[index] shr 16 and 0xff // bitwise shifting
+        G = pix[index] shr 8 and 0xff
+        B = pix[index] and 0xff
+        Log.i(TAG, "RGB: $R, $G, $B")
+        imagePixelData[x, y, 0] = R
+        imagePixelData[x, y, 1] = G
+        imagePixelData[x, y, 2] = B
+
+        // R,G.B - Red, Green, Blue
+        // to restore the values after RGB modification, use
+        // next statement
+        pix[index] = -0x1000000 or (R shl 16) or (G shl 8) or B
+        }
+        }
 
 
-
-            var R: Int
-            var G: Int
-            var B: Int
-            var Y: Int
-
-            for (y in 0 until videoHeight) {
-            for (x in 0 until videoWidth) {
-            val index: Int = y * videoWidth + x
-            R = pix[index] shr 16 and 0xff // bitwise shifting
-            G = pix[index] shr 8 and 0xff
-            B = pix[index] and 0xff
-            Log.i(TAG, "RGB: $R, $G, $B")
-            imagePixelData[x, y, 0] = R
-            imagePixelData[x, y, 1] = G
-            imagePixelData[x, y, 2] = B
-
-            // R,G.B - Red, Green, Blue
-            // to restore the values after RGB modification, use
-            // next statement
-            pix[index] = -0x1000000 or (R shl 16) or (G shl 8) or B
-            }
-            }
-
-
-            }
-             */
-
-
-
+        }
+         */
 
 
     }
@@ -573,14 +595,16 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
             values.put(MediaStore.Images.Media.IS_PENDING, true)
             // RELATIVE_PATH and IS_PENDING are introduced in API 29.
 
-            val uri: Uri? = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            val uri: Uri? =
+                context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
             if (uri != null) {
                 saveImageToStream(bitmap, context.contentResolver.openOutputStream(uri))
                 values.put(MediaStore.Images.Media.IS_PENDING, false)
                 context.contentResolver.update(uri, values, null, null)
             }
         } else {
-            val directory = File(Environment.getExternalStorageDirectory().toString() + separator + folderName)
+            val directory =
+                File(Environment.getExternalStorageDirectory().toString() + separator + folderName)
             //val directory = File(Environment.getStorageDirectory().toString() + separator + folderName)
             // getExternalStorageDirectory is deprecated in API 29
 
@@ -599,7 +623,7 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         }
     }
 
-    private fun contentValues() : ContentValues {
+    private fun contentValues(): ContentValues {
         val values = ContentValues()
         values.put(MediaStore.Images.Media.MIME_TYPE, "image/png")
         values.put(MediaStore.Images.Media.DATE_ADDED, System.currentTimeMillis() / 1000);

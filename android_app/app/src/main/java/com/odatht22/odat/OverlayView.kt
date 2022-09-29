@@ -103,6 +103,10 @@ class OverlayView(context: Context?, attrs: AttributeSet?) : View(context, attrs
         }
     }
 
+    fun clearResults(){
+        results = mutableListOf()
+    }
+
     fun setResults(
       detectionResults: MutableList<Detection>,
       imageHeight: Int,
