@@ -1,9 +1,7 @@
 package com.odatht22.odat
 
-import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
-import android.content.Intent
 import android.graphics.*
 import android.net.Uri
 import android.os.Bundle
@@ -17,7 +15,6 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
-import android.widget.ToggleButton
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import dji.common.camera.SettingsDefinitions.CameraMode
@@ -30,21 +27,28 @@ import dji.sdk.codec.DJICodecManager
 import dji.sdk.products.Aircraft
 import dji.sdk.products.HandHeld
 import dji.sdk.sdkmanager.DJISDKManager
-import java.nio.ByteBuffer
+import dji.ux.widget.ReturnHomeWidget
+import dji.ux.widget.TakeOffWidget
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import java.io.Externalizable
+import org.tensorflow.lite.task.gms.vision.detector.Detection
+import org.w3c.dom.Text
 import java.io.File
 import java.io.File.separator
 import java.io.FileOutputStream
 import java.io.OutputStream
-import java.lang.Exception
+import java.nio.ByteBuffer
+import java.util.*
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+
+
 
 /*
 This activity provides an interface to access a connected DJI Product's camera and use
 it to take photos and record videos
 */
-class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, View.OnClickListener {
+class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, View.OnClickListener, ObjectDetectorHelper.DetectorListener {
 
     // Class Variables
     private val TAG = MainActivity::class.java.name
@@ -56,18 +60,51 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
 
     private lateinit var videoSurface:
             TextureView // Used to display the DJI product's camera video stream
-    private lateinit var captureBtn: Button
-    private lateinit var shootPhotoModeBtn: Button
-    private lateinit var recordVideoModeBtn: Button
-    private lateinit var takeOffBtn: Button
-    private lateinit var landBtn: Button
-    private lateinit var recordBtn: ToggleButton
+    private lateinit var takeOffBtn: TakeOffWidget
+    private lateinit var landBtn: ReturnHomeWidget
     private lateinit var recordingTime: TextView
+    private lateinit var bottomSheetLayout: View
+    private lateinit var detectBtn: Button
+
+
+    // Object detection variables
+
+    private lateinit var objectDetectionHelper: ObjectDetectorHelper
+
+    private lateinit var cameraExecutor: ExecutorService
+
+
+    override fun onInitialized() {
+        objectDetectionHelper.setupObjectDetector()
+        // Initialize our background executor
+        cameraExecutor = Executors.newSingleThreadExecutor()
+
+        // Wait for the views to be properly laid out
+
+
+
+
+    }
+
+    override fun onError(error: String) {
+        Toast.makeText(this, error, Toast.LENGTH_SHORT).show()
+    }
+
+
 
     // Creating the Activity
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestWindowFeature(Window.FEATURE_NO_TITLE)
+        this.window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+
+        window.setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
+            WindowManager.LayoutParams.FLAG_FULLSCREEN);
         setContentView(
                 R.layout.activity_main
         ) // inflating the activity_main.xml layout as the activity's view
@@ -83,6 +120,8 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
                 VideoFeeder.VideoDataListener { videoBuffer, size ->
                     codecManager?.sendDataToDecoder(videoBuffer, size)
                 }
+
+
 
         /*
         NOTES:
@@ -123,19 +162,28 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
                 }
             }
         }
+
+
+        objectDetectionHelper = ObjectDetectorHelper(context = this, objectDetectorListener = this)
+
+
+
+
+
     }
+
+
 
     // Function to initialize the activity's UI elements
     private fun initUi() {
         // referencing the layout views using their resource ids
         videoSurface = findViewById(R.id.video_previewer_surface)
         recordingTime = findViewById(R.id.timer)
-        captureBtn = findViewById(R.id.btn_capture)
-        recordBtn = findViewById(R.id.btn_record)
         takeOffBtn = findViewById(R.id.takeOffBtn)
         landBtn = findViewById(R.id.LandBtn)
-        shootPhotoModeBtn = findViewById(R.id.btn_shoot_photo_mode)
-        recordVideoModeBtn = findViewById(R.id.btn_record_video_mode)
+        bottomSheetLayout = findViewById(R.id.bottom_sheet_layout)
+        detectBtn = findViewById(R.id.inference_button)
+
 
         /*
         Giving videoSurface a listener that checks for when a surface texture is available.
@@ -143,12 +191,13 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         */
         videoSurface.surfaceTextureListener = this
 
+
+
         // Giving the non-toggle button elements a click listener
-        captureBtn.setOnClickListener(this)
-        shootPhotoModeBtn.setOnClickListener(this)
-        recordVideoModeBtn.setOnClickListener(this)
+
         landBtn.setOnClickListener(this)
         takeOffBtn.setOnClickListener(this)
+        detectBtn.setOnClickListener(this)
 
         recordingTime.visibility = View.INVISIBLE
 
@@ -156,13 +205,13 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         recordBtn is a ToggleButton that when checked, the DJI product's camera starts video recording.
         When unchecked, the camera stops video recording.
         */
-        recordBtn.setOnCheckedChangeListener { buttonView, isChecked ->
-            if (isChecked) {
-                startRecord()
-            } else {
-                stopRecord()
-            }
-        }
+
+    }
+
+
+    private fun detectObjects(bitmap: Bitmap) {
+        // Pass Bitmap and rotation to the object detector helper for processing and detection
+        objectDetectionHelper.detect(bitmap)
     }
 
     // Function to make the DJI drone's camera start video recording
@@ -219,8 +268,60 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
             if (product.model != Model.UNKNOWN_AIRCRAFT) {
                 receivedVideoDataListener?.let {
                     VideoFeeder.getInstance().primaryVideoFeed.addVideoDataListener(it)
+
                 }
             }
+        }
+    }
+
+    private fun startObjectDetection(){
+
+
+        for (i in 1..1000){
+
+
+                cameraExecutor.execute {
+                    getImageData()?.let {
+
+                        detectObjects(
+                            it
+                        )
+
+                    }
+                }
+
+
+        }
+    }
+
+
+    // Update UI after objects have been detected. Extracts original image height/width
+    // to scale and place bounding boxes properly through OverlayView
+    override fun onResults(
+        results: MutableList<Detection>?,
+        inferenceTime: Long,
+        imageHeight: Int,
+        imageWidth: Int
+    ) {
+        runOnUiThread {
+
+
+
+            val textView: TextView = findViewById<TextView>(R.id.inference_time_val)
+            textView.text = String.format("%d ms", inferenceTime)
+
+            // Pass necessary information to OverlayView for drawing on the canvas
+            val overlay: OverlayView = findViewById(R.id.overlay)
+            //Log.i(TAG, "results: $results")
+            results?.removeIf{detection -> detection.categories[0].label != "person"}
+            overlay.setResults(
+                results ?: LinkedList<Detection>(),
+                imageHeight,
+                imageWidth
+            )
+
+            // Force a redraw
+            overlay.invalidate()
         }
     }
 
@@ -275,22 +376,7 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
     // Handling what happens when certain layout views are clicked
     override fun onClick(v: View?) {
         when (v?.id) {
-            // If the capture button is pressed, take a photo with the DJI product's camera
-            R.id.btn_capture -> {
-                // captureAction()
-                runBlocking {
 
-                    getImageData()
-                }
-            }
-            // If the shoot photo mode button is pressed, set camera to only take photos
-            R.id.btn_shoot_photo_mode -> {
-                switchCameraMode(CameraMode.SHOOT_PHOTO)
-            }
-            // If the record video mode button is pressed, set camera to only record videos
-            R.id.btn_record_video_mode -> {
-                switchCameraMode(CameraMode.RECORD_VIDEO)
-            }
             // R.id.takeOffBtn -> {
             //     (getProductInstance() as Aircraft).flightController?.let { flightController ->
             //         flightController.startTakeoff { err ->
@@ -305,6 +391,11 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
 
             //     }
             // }
+
+            R.id.inference_button -> {
+                Log.i(TAG, "Starting inference process")
+                startObjectDetection()
+            }
             R.id.LandBtn -> {
                 (getProductInstance() as Aircraft).flightController?.let { flightController ->
                     flightController.startLanding { err ->
@@ -410,24 +501,24 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         return isCameraModuleAvailable() && (getProductInstance()?.camera?.playbackManager != null)
     }
 
-    private suspend fun getImageData() {
+    private fun getImageData() :Bitmap? {
 
 
-        runBlocking {
 
             val videoWidth: Int? = codecManager?.videoWidth
             val videoHeight: Int? = codecManager?.videoHeight
-            Log.i(TAG, "Video size: $videoWidth x $videoHeight")
             if (videoWidth == null || videoHeight == null) {
-                return@runBlocking
+                return null
             }
-            val imageData: ByteArray = codecManager?.getRgbaData(videoWidth, videoHeight) ?: return@runBlocking
+            val imageData: ByteArray = codecManager?.getRgbaData(videoWidth, videoHeight) ?: return null
             val bmp: Bitmap = Bitmap.createBitmap(videoWidth, videoHeight, Bitmap.Config.ARGB_8888)
             val buffer: ByteBuffer = ByteBuffer.wrap(imageData)
             bmp.copyPixelsFromBuffer(buffer)
             val size: Int = 10
+            return bmp
+            //saveImage(bmp, this@MainActivity, "ODaT")
 
-            saveImage(bmp, this@MainActivity, "ODaT")
+
             /**
              * launch {
             // val pixels = IntArray(bmp.width * bmp.height)
@@ -469,7 +560,7 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
              */
 
 
-        }
+
 
 
     }

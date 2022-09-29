@@ -5,6 +5,8 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.view.Window
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.TextView
 import androidx.activity.viewModels
@@ -30,6 +32,12 @@ class ConnectionActivity : AppCompatActivity() {
 
     companion object {
         const val TAG = "ConnectionActivity"
+    }
+
+    override fun onRestart() {
+        super.onRestart()
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+
     }
 
     //Creating the Activity
@@ -79,14 +87,17 @@ class ConnectionActivity : AppCompatActivity() {
         //Getting the DJI SDK version and displaying it on mVersionTv TextView
         mVersionTv.text = resources.getString(R.string.sdk_version, DJISDKManager.getInstance().sdkVersion)
 
-        mBtnOpen.isEnabled = false //mBtnOpen Button is initially disabled
+        mBtnOpen.isEnabled = true //mBtnOpen Button is initially disabled
 
         //If mBtnOpen Button is clicked on, start MainActivity (only works when button is enabled)
         mBtnOpen.setOnClickListener {
             val intent = Intent(this, MainActivity::class.java)
             requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+
             startActivity(intent)
+
         }
+
     }
 
 
@@ -102,7 +113,7 @@ class ConnectionActivity : AppCompatActivity() {
             }
             else {
                 mTextConnectionStatus.text = "Status: Disconnected"
-                mBtnOpen.isEnabled = false
+                mBtnOpen.isEnabled = true
             }
         })
 

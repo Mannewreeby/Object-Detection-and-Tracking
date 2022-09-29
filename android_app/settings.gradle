@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "ODaT"
-include ':app'
+include ':app', ':tensorflow-lite'
