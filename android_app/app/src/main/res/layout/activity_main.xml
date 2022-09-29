@@ -70,6 +70,15 @@
             android:layout_width="18dp"
             android:layout_height="32dp"
             android:layout_marginTop="3dp" />
+
+        <Button
+            android:id="@+id/inference_button"
+            android:layout_width="80dp"
+            android:layout_height="37dp"
+            android:padding="0dp"
+            android:layout_marginLeft="15dp"
+            android:layout_marginTop="-3dp"
+            android:text="detect"/>
     </LinearLayout>
 
     <LinearLayout
@@ -127,19 +136,10 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"/>
 
-    <Button
-        android:id="@+id/inference_button"
-        android:layout_width="100dp"
-        android:layout_height="60dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-
-        android:layout_gravity="end|center_vertical"
-        android:layout_marginRight="10dp"
-        android:text="detect">
 
 
-    </Button>
+
+
 
     <TextView
         android:id="@+id/timer"
