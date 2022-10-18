@@ -313,7 +313,7 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
 
     // Helper-function to start object detection
     private fun detectObjects(bitmap: Bitmap) {
-        // Pass Bitmap and rotation to the object detector helper for processing and detection
+        // Pass Bitmap to the object detector helper for processing and detection
         objectDetectionHelper.detect(bitmap)
     }
 
@@ -573,35 +573,12 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
                     Log.i(TAG, "Rotation step X $rotationX")
 
 
-/*
-                    if (pixelDistanceX.absoluteValue > 150) {
-                        rotationX = min(
-                            2f * pixelDistanceX.absoluteValue / 3 * pixelDistanceX.sign,
-                            rotationSpeed
-                        )
-                        rotationX = max(rotationX, -rotationSpeed)
-                        //setGimbalYaw(rotationX,
-                        //0.4)
-                        //Log.i(TAG, "Rotating Yaw $rotation degrees")
-
-                    }*/
-
-
-
                     val centerY = overlay.height / 2
                     val targetCenterY = target.boundingBox.centerY() * overlay.scaleFactor
                     val pixelDistanceY = (targetCenterY - centerY)
                     var rotationY: Float = (2f / ( 1f + exp(-pixelDistanceX/200.0)) - 1).toFloat() * rotationSpeed / 3
                     rotationY /= (100f / cycleTime.toFloat()) * 3
-                   /* if (pixelDistanceY.absoluteValue > 100) {
-                        rotationY = min(
-                            -2.0f * pixelDistanceY.absoluteValue / 300 * pixelDistanceY.sign,
-                            rotationSpeed
-                        )
-                        rotationY = max(rotationY, -rotationSpeed)
-                        //setGimbalPitch(rotationY, 0.4)
-                        //Log.i(TAG, "Rotating Pitch $rotation degrees")
-                    }*/
+
                     Log.i(TAG, "Rotation speed ${cycleTime / 1000}")
                     rotateGimbal(rotationX, rotationY, cycleTime.toDouble() / 1000)
 
@@ -629,23 +606,15 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
                         if (diff == 0f) {
                             diff = 0.01f
                         }
-                        /*val droneSpeed: Float =
-                            (atan((diff - 4) / diff) + Math.PI / 2).toFloat() / 2.3f * droneMaxSpeed*/
 
-                        //val droneSpeed: Float = (2f / ( 1f + exp(-diff/2.0)) - 1).toFloat() * droneMaxSpeed
                         val droneSpeed: Float = (2f / (1f + exp(-(diff.absoluteValue*1.3 - 3))) - .06).toFloat() / 2f * droneMaxSpeed*diff.sign
 
 
                         var heading = droneHeading
-/*
-                        if (droneGimbalYawInDegrees.absoluteValue > maxAcceptableGimbalYawRotation) {
-                            heading += droneGimbalYawInDegrees * gimbalCompensationRotationSpeed
-                            //rotateGimbal(-droneGimbalYawInDegrees * gimbalCompensationRotationSpeed, 0f, .05)
-                        }*/
-                        //if (droneGimbalYawInDegrees.absoluteValue > maxAcceptableGimbalYawRotation) {
+
+
                         heading += (2 / (1 + exp(-(droneGimbalYawInDegrees.absoluteValue - 7)/2)) - .06f) * 2 * droneGimbalYawInDegrees.sign
-                            //rotateGimbal(-droneGimbalYawInDegrees * gimbalCompensationRotationSpeed, 0f, .05)
-                        //}
+
 
 
 
@@ -653,11 +622,7 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
                             droneSpeed * sin(Math.toRadians(droneHeading.toDouble())).toFloat()
                         val droneSpeedEast =
                             droneSpeed * cos(Math.toRadians(droneHeading.toDouble())).toFloat()
-                        /*            if (droneGimbalYawInDegrees.absoluteValue > 30){
-                                        val compensate = droneGimbalPitchInDegrees * .01f
-                                        targetHeading += compensate
-                                        rotateGimbal(-compensate, 0f, .1)
-                                    }*/
+
 
 
                         // FlightControlData(North, East, droneHeading, verticalSpeed)
