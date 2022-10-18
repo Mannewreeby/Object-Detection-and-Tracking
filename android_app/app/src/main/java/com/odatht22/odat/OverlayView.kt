@@ -35,8 +35,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) : View(context, attrs
     private var boxPaint = Paint()
     private var textBackgroundPaint = Paint()
     private var textPaint = Paint()
-
-    private var scaleFactor: Float = 1f
+    var trackedObject: Detection? = null
+    var scaleFactor: Float = 1f
 
     private var bounds = Rect()
 
@@ -66,10 +66,30 @@ class OverlayView(context: Context?, attrs: AttributeSet?) : View(context, attrs
         boxPaint.style = Paint.Style.STROKE
     }
 
+    private fun resetBoxPaintColor(){
+        boxPaint.color = ContextCompat.getColor(context!!, R.color.bounding_box_color)
+    }
+
     override fun draw(canvas: Canvas) {
         super.draw(canvas)
 
+        var hasDrawnTarget = false
+
         for (result in results) {
+
+            if (trackedObject != null && result == trackedObject){
+                boxPaint.color = Color.GREEN
+                val bBox:RectF = result.boundingBox
+                val centerX = bBox.left + (bBox.right-bBox.left)/2
+                val centerY = bBox.top + (bBox.bottom-bBox.top)/2
+                canvas.drawLine(width.toFloat() / 2, height.toFloat() / 2, centerX * scaleFactor, centerY * scaleFactor, textPaint)
+                hasDrawnTarget = true
+            } else {
+                resetBoxPaintColor()
+                if (trackedObject != null) {
+                    continue
+                }
+            }
             val boundingBox = result.boundingBox
 
             val top = boundingBox.top * scaleFactor
@@ -101,6 +121,16 @@ class OverlayView(context: Context?, attrs: AttributeSet?) : View(context, attrs
             // Draw text for detected object
             canvas.drawText(drawableText, left, top + bounds.height(), textPaint)
         }
+
+        if (trackedObject != null && !hasDrawnTarget){
+            boxPaint.color = Color.RED
+            val bBox:RectF = trackedObject!!.boundingBox
+            val centerX = bBox.left + (bBox.right-bBox.left)/2
+            val centerY = bBox.top + (bBox.bottom-bBox.top)/2
+            canvas.drawLine(width.toFloat() / 2, height.toFloat() / 2, centerX * scaleFactor, centerY * scaleFactor, textPaint)
+            resetBoxPaintColor()
+
+        }
     }
 
     fun clearResults(){
@@ -112,6 +142,11 @@ class OverlayView(context: Context?, attrs: AttributeSet?) : View(context, attrs
       imageHeight: Int,
       imageWidth: Int,
     ) {
+
+        for (result in detectionResults){
+            result.boundingBox.top-=90
+            result.boundingBox.bottom-=90
+        }
         results = detectionResults
 
         // PreviewView is in FILL_START mode. So we need to scale up the bounding box to match with

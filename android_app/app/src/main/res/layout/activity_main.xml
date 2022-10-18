@@ -15,14 +15,16 @@
         android:layout_height="match_parent"
         android:layout_above="@+id/linearLayout"
         android:layout_gravity="center"
-        android:layout_marginBottom="-2dp"
         app:layout_constraintBottom_toTopOf="@+id/linearLayout"
-        app:layout_constraintStart_toStartOf="parent" />
+        app:layout_constraintStart_toStartOf="parent" >
+
+    </TextureView>
 
     <com.odatht22.odat.OverlayView
         android:id="@+id/overlay"
+        android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_width="match_parent" />
+        android:layout_gravity="center"/>
 
     <LinearLayout
         android:id="@+id/signal"
@@ -76,8 +78,10 @@
             android:layout_width="80dp"
             android:layout_height="37dp"
             android:padding="0dp"
-            android:layout_marginLeft="15dp"
+            android:layout_marginStart="15dp"
             android:layout_marginTop="-3dp"
+            android:background="#2E73C8"
+            android:textColor="@color/white"
             android:text="detect"/>
     </LinearLayout>
 
@@ -99,6 +103,46 @@
             android:layout_height="91dp"
             android:layout_marginRight="12dp"
             tools:ignore="RtlHardcoded" />
+
+        <LinearLayout
+
+            android:id="@+id/distance_to_target_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+
+
+
+            <TextView
+                android:id="@+id/dtt_title"
+                android:layout_width="140dp"
+                android:layout_height="20dp"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:visibility="invisible"
+                android:background="@color/black"
+                android:textColor="@color/white"
+                android:layout_marginStart="10dp"
+                android:text="Distance to Target:" />
+
+            <TextView
+                android:id="@+id/dtt_value"
+                android:layout_width="50dp"
+                android:layout_height="20dp"
+                android:textSize="16sp"
+                android:textStyle="bold"
+
+
+                android:text="-" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content">
+
+        </LinearLayout>
+        
+
 
     </LinearLayout>
 
@@ -127,6 +171,15 @@
             android:layout_height="40dp"
             android:layout_marginTop="12dp" />
     </LinearLayout>
+    <dji.ux.widget.controls.CameraControlsWidget
+        android:id="@+id/CameraCapturePanel"
+        android:layout_alignParentRight="true"
+        android:layout_gravity="center_vertical|end"
+        android:layout_marginEnd="10dp"
+        android:layout_marginBottom="70dp"
+        android:layout_width="50dp"
+        android:layout_height="213dp"
+        tools:ignore="RtlHardcoded"/>
 
     <LinearLayout
         android:id="@+id/linearLayout"

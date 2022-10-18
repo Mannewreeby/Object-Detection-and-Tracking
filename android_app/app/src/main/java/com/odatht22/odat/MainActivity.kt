@@ -1,5 +1,6 @@
 package com.odatht22.odat
 
+import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.*
@@ -12,36 +13,38 @@ import android.view.TextureView
 import android.view.View
 import android.view.Window
 import android.view.WindowManager
-import android.widget.Button
-import android.widget.TextView
-import android.widget.Toast
+import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.lifecycleScope
-import dji.common.camera.SettingsDefinitions.CameraMode
-import dji.common.camera.SettingsDefinitions.ShootPhotoMode
+import androidx.appcompat.widget.AppCompatImageButton
+import androidx.appcompat.widget.AppCompatSpinner
+import androidx.core.view.isVisible
+import dji.common.flightcontroller.virtualstick.FlightControlData
+import dji.common.flightcontroller.virtualstick.RollPitchControlMode
+import dji.common.flightcontroller.virtualstick.VerticalControlMode
+import dji.common.gimbal.*
 import dji.common.product.Model
 import dji.sdk.base.BaseProduct
 import dji.sdk.camera.Camera
 import dji.sdk.camera.VideoFeeder
 import dji.sdk.codec.DJICodecManager
+import dji.sdk.flightcontroller.FlightController
 import dji.sdk.products.Aircraft
 import dji.sdk.products.HandHeld
 import dji.sdk.sdkmanager.DJISDKManager
 import dji.ux.widget.ReturnHomeWidget
 import dji.ux.widget.TakeOffWidget
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import org.tensorflow.lite.task.gms.vision.detector.Detection
-import org.w3c.dom.Text
 import java.io.File
 import java.io.File.separator
 import java.io.FileOutputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
+import java.text.DecimalFormat
 import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
+import kotlin.concurrent.schedule
+import kotlin.math.*
 
 
 /*
@@ -59,38 +62,109 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
     private var codecManager: DJICodecManager? =
         null // handles the encoding and decoding of video data
 
+    // Used to display the DJI product's camera video stream
     private lateinit var videoSurface:
-            TextureView // Used to display the DJI product's camera video stream
+            TextureView
+    // UI elements
     private lateinit var takeOffBtn: TakeOffWidget
     private lateinit var landBtn: ReturnHomeWidget
     private lateinit var recordingTime: TextView
     private lateinit var bottomSheetLayout: View
     private lateinit var detectBtn: Button
-
+    private lateinit var distanceToTargetGroup: LinearLayout
 
     // Object detection variables
-
-    private lateinit var objectDetectionHelper: ObjectDetectorHelper
+    private var detectionResults: MutableList<Detection>? = null
+    private var shouldFollow: Boolean = false
     private var shouldDetectObjects: Boolean = false
-    private lateinit var cameraExecutor: ExecutorService
+    private lateinit var objectDetectionHelper: ObjectDetectorHelper
+    private var hasLostTarget: Boolean = false
+    private var trackedObjectLastLocations: ArrayList<Detection> = arrayListOf()
+
+    // Drone stats
+    private var droneGimbalPitchInDegrees: Float = 0f
+    private var droneGimbalYawInDegrees: Float = 0f
+
+
+
+    // Inference and flight controller threads
+    private lateinit var inferenceExecutor: ExecutorService
+    private lateinit var flightControllerExecutor: ExecutorService
+
+
+    // Gimbal parameters
+    private var gimbalMaxAnglePerSecond: Float = 10f
+    private var followDistance: Float = 7f
 
 
     override fun onInitialized() {
         objectDetectionHelper.setupObjectDetector()
-        // Initialize our background executor
-        cameraExecutor = Executors.newSingleThreadExecutor()
-
-        // Wait for the views to be properly laid out
+        // Initialize our background executors
+        inferenceExecutor = Executors.newSingleThreadExecutor()
+        flightControllerExecutor = Executors.newSingleThreadExecutor()
+        setupListeners()
+        // In case the gimbal was not aligned properly on application start, for instance if we restarted the app but left the aircraft on
+        resetCameraGimbalYaw()
 
 
     }
 
+    // Handle errors from the object detection
     override fun onError(error: String) {
+
         Toast.makeText(this, error, Toast.LENGTH_SHORT).show()
     }
 
 
-    // Creating the Activity
+    // Setup necessary listeners such as updating the gimbal pitch and yaw, also listen for 'emergency stop' button presses
+    private fun setupListeners() {
+
+        getAircraftInstance().gimbal.setStateCallback { gimbalState ->
+            droneGimbalPitchInDegrees = gimbalState.attitudeInDegrees.pitch
+            droneGimbalYawInDegrees = gimbalState.yawRelativeToAircraftHeading
+
+            /* droneGimbalYawInDegrees =
+                 gimbalState.attitudeInDegrees.yaw - getAircraftInstance().flightController.compass.heading - compassMissalignment
+ */
+            //Log.i(TAG, "Gimbal yaw in degrees $droneGimbalYawInDegrees")
+
+        }
+
+        getAircraftInstance().remoteController.setHardwareStateCallback { state ->
+
+
+            if (shouldFollow && ((state.c1Button != null && state.c1Button!!.isClicked) || (state.c2Button != null && state.c2Button!!.isClicked))) {
+                stopFollow()
+                showToast("Emergency stop")
+            }
+
+            if (state.fiveDButton != null && state.fiveDButton!!.isClicked) {
+
+                resetCameraGimbalYaw()
+            }
+
+
+        }
+
+        /*
+       The receivedVideoDataListener receives the raw video data and the size of the data from the DJI product.
+       It then sends this data to the codec manager for decoding.
+       */
+        receivedVideoDataListener =
+            VideoFeeder.VideoDataListener { videoBuffer, size ->
+                codecManager?.sendDataToDecoder(videoBuffer, size)
+            }
+
+
+    }
+
+    // Function that points the camera straight forward in the yaw axis
+    private fun resetCameraGimbalYaw() {
+        getAircraftInstance().gimbal.reset(Axis.YAW, ResetDirection.CENTER, null)
+    }
+
+
+    // Creating the Activity, initialize variables
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -104,7 +178,7 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         window.setFlags(
             WindowManager.LayoutParams.FLAG_FULLSCREEN,
             WindowManager.LayoutParams.FLAG_FULLSCREEN
-        );
+        )
         setContentView(
             R.layout.activity_main
         ) // inflating the activity_main.xml layout as the activity's view
@@ -112,14 +186,7 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         supportActionBar?.hide() // Hide app name bar
         initUi() // initializing the UI
 
-        /*
-        The receivedVideoDataListener receives the raw video data and the size of the data from the DJI product.
-        It then sends this data to the codec manager for decoding.
-        */
-        receivedVideoDataListener =
-            VideoFeeder.VideoDataListener { videoBuffer, size ->
-                codecManager?.sendDataToDecoder(videoBuffer, size)
-            }
+
 
 
         /*
@@ -170,6 +237,7 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
 
 
     // Function to initialize the activity's UI elements
+    @SuppressLint("ClickableViewAccessibility")
     private fun initUi() {
         // referencing the layout views using their resource ids
         videoSurface = findViewById(R.id.video_previewer_surface)
@@ -178,6 +246,17 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         landBtn = findViewById(R.id.LandBtn)
         bottomSheetLayout = findViewById(R.id.bottom_sheet_layout)
         detectBtn = findViewById(R.id.inference_button)
+
+        distanceToTargetGroup = findViewById(R.id.distance_to_target_group)
+        distanceToTargetGroup.isVisible = false
+        distanceToTargetGroup.visibility = View.INVISIBLE
+
+        findViewById<OverlayView>(R.id.overlay).setOnClickListener(this)
+
+        if (!isAircraftConnected()) {
+            detectBtn.isClickable = false
+            detectBtn.isEnabled = false
+        }
 
 
         /*
@@ -195,14 +274,44 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
 
         recordingTime.visibility = View.INVISIBLE
 
-        /*
-        recordBtn is a ToggleButton that when checked, the DJI product's camera starts video recording.
-        When unchecked, the camera stops video recording.
-        */
+        findViewById<OverlayView>(R.id.overlay).setOnTouchListener { view, motionEvent ->
+
+            // X and Y values are fetched
+            val mX = motionEvent.x
+            val mY = motionEvent.y
+            val overlay: OverlayView = findViewById(R.id.overlay)
+
+            if (detectionResults != null) {
+                val scaleFactor = overlay.scaleFactor
+
+                for (detection in detectionResults!!) {
+                    val dBox: RectF = detection.boundingBox
+                    val onScreenBox = RectF(
+                        dBox.left * scaleFactor,
+                        dBox.top * scaleFactor,
+                        dBox.right * scaleFactor,
+                        dBox.bottom * scaleFactor
+                    )
+                    if (onScreenBox.contains(mX, mY))
+                        findViewById<OverlayView>(R.id.overlay).trackedObject = detection
+                }
+
+            }
+
+
+            view.performClick()
+            true
+        }
+
+
+
+        initBottomSheetControls()
+
 
     }
 
 
+    // Helper-function to start object detection
     private fun detectObjects(bitmap: Bitmap) {
         // Pass Bitmap and rotation to the object detector helper for processing and detection
         objectDetectionHelper.detect(bitmap)
@@ -244,6 +353,81 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         }
     }
 
+
+    // Initialize components tied to the bottom controls sheetw
+    private fun initBottomSheetControls() {
+        // When clicked, increase the number of objects that can be detected at a time
+
+        findViewById<AppCompatImageButton>(R.id.max_results_plus).setOnClickListener {
+            objectDetectionHelper.maxResults++
+            findViewById<TextView>(R.id.max_results_value).text =
+                objectDetectionHelper.maxResults.toString()
+        }
+
+        findViewById<AppCompatImageButton>(R.id.max_results_minus).setOnClickListener {
+            if (objectDetectionHelper.maxResults - 1 > 0) {
+                objectDetectionHelper.maxResults--
+                findViewById<TextView>(R.id.max_results_value).text =
+                    objectDetectionHelper.maxResults.toString()
+            }
+
+        }
+        val df = DecimalFormat("#.#")
+
+
+        findViewById<AppCompatImageButton>(R.id.gimbal_move_time_minus).setOnClickListener {
+            if (followDistance > 2) followDistance -= 1
+            findViewById<TextView>(R.id.gimbal_move_speed_value).text = df.format(followDistance)
+        }
+
+        findViewById<AppCompatImageButton>(R.id.gimbal_move_time_plus).setOnClickListener {
+            followDistance += 1
+            findViewById<TextView>(R.id.gimbal_move_speed_value).text = df.format(followDistance)
+        }
+
+
+        findViewById<AppCompatImageButton>(R.id.max_angle_minus).setOnClickListener {
+            if (gimbalMaxAnglePerSecond > 1) gimbalMaxAnglePerSecond -= 0.5f
+            findViewById<TextView>(R.id.max_angle_value).text = gimbalMaxAnglePerSecond.toString()
+        }
+
+        findViewById<AppCompatImageButton>(R.id.max_angle_plus).setOnClickListener {
+            if (gimbalMaxAnglePerSecond < 6) gimbalMaxAnglePerSecond += 0.5f
+            findViewById<TextView>(R.id.max_angle_value).text = gimbalMaxAnglePerSecond.toString()
+        }
+
+
+
+
+
+
+
+
+        findViewById<AppCompatSpinner>(R.id.spinner_model).onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p0: AdapterView<*>?, p1: View?, p2: Int, p3: Long) {
+                    if (!objectDetectionHelper.isInitialized()) {
+                        return
+                    }
+                    objectDetectionHelper.currentModel = p2
+                    objectDetectionHelper.clearObjectDetector()
+                    var modelName: String = objectDetectionHelper.setupObjectDetector()
+                    showToast("Changed to $modelName model")
+
+                }
+
+                override fun onNothingSelected(p0: AdapterView<*>?) {
+                    /*Do nothing*/
+                }
+
+            }
+
+        findViewById<TextView>(R.id.max_angle_value).text = gimbalMaxAnglePerSecond.toString()
+        findViewById<TextView>(R.id.gimbal_move_speed_value).text = followDistance.toString()
+
+
+    }
+
     // Function that initializes the display for the videoSurface TextureView
     private fun initPreviewer() {
 
@@ -268,9 +452,253 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         }
     }
 
+
+    /*Rotate the drones camera gimbal in yaw and pitch */
+    private fun rotateGimbal(yaw: Float, pitch: Float, time: Double) {
+        val builder = Rotation.Builder().mode(RotationMode.RELATIVE_ANGLE).time(time)
+        builder.yaw(yaw)
+        builder.pitch(pitch)
+        getProductInstance()?.gimbal?.rotate(builder.build()) { x ->
+            if (x != null) Log.e("rotateGimbal error", x.toString())
+        }
+    }
+
+
+    private fun calculateDistanceToDetection(target: Detection): Float {
+
+        val overlay: OverlayView = findViewById(R.id.overlay)
+
+        // Calculate distance to target
+        val droneHeight: Float =
+            (getProductInstance() as Aircraft).flightController.state.ultrasonicHeightInMeters
+        val gimbalPitch: Float = droneGimbalPitchInDegrees
+
+
+/*
+        // Pixel distance x
+        val centerX: Int = overlay.width / 2
+        val targetCenterX: Float = target.boundingBox.centerY() * overlay.scaleFactor
+        val pixelDistanceX: Float = targetCenterX - centerX
+*/
+
+        // Pixel distance y
+        val centerY = overlay.height / 2
+        val targetCenterY = target.boundingBox.bottom * overlay.scaleFactor
+        val pixelDistanceY = (centerY - targetCenterY)
+
+
+        // Assumption: Target object height is 0m
+        //var objectHeight = 0f
+        // Approximation of angle towards target relative to the gimbals orientation, the DJI camera fov is 77º horizontally and assumed 40º vertical
+        // Calculate horizontal angle towards object
+        // var horizontalAngle: Float = ( 77f / overlay.width)*pixelDistanceX
+        val verticalAngle: Float = (40f / overlay.height) * pixelDistanceY
+
+        val trueVerticalAngle = (verticalAngle + gimbalPitch).absoluteValue.toDouble() + 3 //
+
+        val distanceToTarget: Float = droneHeight / tan(Math.toRadians(trueVerticalAngle)).toFloat()
+
+        return distanceToTarget
+
+    }
+
+
+    /* Starts a new thread responsible for sending control signals to the drone in an effort to keep up with the target being tracked*/
+    private fun startFollowingObject() {
+        flightControllerExecutor.execute {
+
+            val rotationSpeed: Float = gimbalMaxAnglePerSecond
+
+
+            (getProductInstance() as Aircraft).flightController.rollPitchControlMode =
+                RollPitchControlMode.VELOCITY;
+            (getProductInstance() as Aircraft).flightController.verticalControlMode =
+                VerticalControlMode.VELOCITY;
+
+            var cycleTime: Long? = null
+            while (true) {
+
+                val start: Long = System.currentTimeMillis()
+                if (cycleTime == null){
+                    cycleTime = 50
+                }
+
+
+
+                val droneHeading = getAircraftInstance().flightController.compass.heading
+
+
+                if (!shouldFollow) {
+
+
+                    getAircraftInstance().flightController.sendVirtualStickFlightControlData(
+                        FlightControlData(0f, 0f, droneHeading, 0f), null
+                    )
+                    break
+                }
+
+                if (hasLostTarget) {
+                    getAircraftInstance().flightController.sendVirtualStickFlightControlData(
+                        FlightControlData(0f, 0f, droneHeading, 0f), null
+                    )
+                    Thread.sleep(40)
+                    continue
+                }
+
+
+                val overlay: OverlayView = findViewById(R.id.overlay)
+
+
+
+
+
+
+
+
+                if (shouldFollow && overlay.trackedObject != null) {
+
+                    val target: Detection = overlay.trackedObject!!
+
+                    val flightController: FlightController =
+                        (getProductInstance() as Aircraft).flightController
+
+                    val centerX: Int = overlay.width / 2
+                    val targetCenterX: Float = target.boundingBox.centerX() * overlay.scaleFactor
+                    val pixelDistanceX: Float = (targetCenterX - centerX)
+                    // val degreesPerPixel: Float = 77f /  overlay.width.toFloat()
+                    var rotationX: Float = (2f / ( 1f + exp(-pixelDistanceX/200.0)) - 1).toFloat() * rotationSpeed
+                    Log.i(TAG, "Rotation angle before time scale $rotationX")
+                    rotationX /= (100f / cycleTime.toFloat()) * 3
+                    Log.i(TAG, "Pixel distance X $pixelDistanceX")
+                    Log.i(TAG, "Rotation step X $rotationX")
+
+
+/*
+                    if (pixelDistanceX.absoluteValue > 150) {
+                        rotationX = min(
+                            2f * pixelDistanceX.absoluteValue / 3 * pixelDistanceX.sign,
+                            rotationSpeed
+                        )
+                        rotationX = max(rotationX, -rotationSpeed)
+                        //setGimbalYaw(rotationX,
+                        //0.4)
+                        //Log.i(TAG, "Rotating Yaw $rotation degrees")
+
+                    }*/
+
+
+
+                    val centerY = overlay.height / 2
+                    val targetCenterY = target.boundingBox.centerY() * overlay.scaleFactor
+                    val pixelDistanceY = (targetCenterY - centerY)
+                    var rotationY: Float = (2f / ( 1f + exp(-pixelDistanceX/200.0)) - 1).toFloat() * rotationSpeed / 3
+                    rotationY /= (100f / cycleTime.toFloat()) * 3
+                   /* if (pixelDistanceY.absoluteValue > 100) {
+                        rotationY = min(
+                            -2.0f * pixelDistanceY.absoluteValue / 300 * pixelDistanceY.sign,
+                            rotationSpeed
+                        )
+                        rotationY = max(rotationY, -rotationSpeed)
+                        //setGimbalPitch(rotationY, 0.4)
+                        //Log.i(TAG, "Rotating Pitch $rotation degrees")
+                    }*/
+                    Log.i(TAG, "Rotation speed ${cycleTime / 1000}")
+                    rotateGimbal(rotationX, rotationY, cycleTime.toDouble() / 1000)
+
+                    val distanceToTarget: Float = calculateDistanceToDetection(target)
+                    val df: DecimalFormat = DecimalFormat("#.#")
+                    //Log.i(TAG, "Distance to target is: $distanceToTarget")
+                    """${df.format(distanceToTarget)}m""".also {
+                        findViewById<TextView>(R.id.dtt_value).text = it
+                    }
+
+
+                    /*val maxAcceptableGimbalYawRotation: Float = 5f*/
+                    val gimbalCompensationRotationSpeedMax: Float = .2f
+                    var gimbalCompensationRotationSpeed = (pixelDistanceX / 500).absoluteValue
+                    if (gimbalCompensationRotationSpeed > gimbalCompensationRotationSpeedMax) {
+                        gimbalCompensationRotationSpeed = gimbalCompensationRotationSpeedMax
+                    }
+
+
+
+
+                    if ((distanceToTarget - followDistance).absoluteValue > 0) {
+                        val droneMaxSpeed: Float = 5f // m/s
+                        var diff = distanceToTarget - followDistance
+                        if (diff == 0f) {
+                            diff = 0.01f
+                        }
+                        /*val droneSpeed: Float =
+                            (atan((diff - 4) / diff) + Math.PI / 2).toFloat() / 2.3f * droneMaxSpeed*/
+
+                        //val droneSpeed: Float = (2f / ( 1f + exp(-diff/2.0)) - 1).toFloat() * droneMaxSpeed
+                        val droneSpeed: Float = (2f / (1f + exp(-(diff.absoluteValue*1.3 - 3))) - .06).toFloat() / 2f * droneMaxSpeed*diff.sign
+
+
+                        var heading = droneHeading
+/*
+                        if (droneGimbalYawInDegrees.absoluteValue > maxAcceptableGimbalYawRotation) {
+                            heading += droneGimbalYawInDegrees * gimbalCompensationRotationSpeed
+                            //rotateGimbal(-droneGimbalYawInDegrees * gimbalCompensationRotationSpeed, 0f, .05)
+                        }*/
+                        //if (droneGimbalYawInDegrees.absoluteValue > maxAcceptableGimbalYawRotation) {
+                        heading += (2 / (1 + exp(-(droneGimbalYawInDegrees.absoluteValue - 7)/2)) - .06f) * 2 * droneGimbalYawInDegrees.sign
+                            //rotateGimbal(-droneGimbalYawInDegrees * gimbalCompensationRotationSpeed, 0f, .05)
+                        //}
+
+
+
+                        val droneSpeedNorth =
+                            droneSpeed * sin(Math.toRadians(droneHeading.toDouble())).toFloat()
+                        val droneSpeedEast =
+                            droneSpeed * cos(Math.toRadians(droneHeading.toDouble())).toFloat()
+                        /*            if (droneGimbalYawInDegrees.absoluteValue > 30){
+                                        val compensate = droneGimbalPitchInDegrees * .01f
+                                        targetHeading += compensate
+                                        rotateGimbal(-compensate, 0f, .1)
+                                    }*/
+
+
+                        // FlightControlData(North, East, droneHeading, verticalSpeed)
+                        (getProductInstance() as Aircraft).flightController.sendVirtualStickFlightControlData(
+                            FlightControlData(droneSpeedNorth, droneSpeedEast, heading, 0f),
+                            null
+                        )
+                    } else {
+                        var heading = droneHeading
+
+                        Log.i(TAG, "Drone body angle correction ${(2 / (1 + exp(-droneGimbalYawInDegrees)) - .38f) * 6}")
+
+                        //if (droneGimbalYawInDegrees.absoluteValue > maxAcceptableGimbalYawRotation) {
+                            heading += (2 / (1 + exp(-(droneGimbalYawInDegrees.absoluteValue - 7)/2)) - .06f) * 2 * droneGimbalYawInDegrees.sign
+                            //rotateGimbal(-droneGimbalYawInDegrees * gimbalCompensationRotationSpeed, 0f, .05)
+                       // }
+
+
+                        getAircraftInstance().flightController.sendVirtualStickFlightControlData(
+                            FlightControlData(0f, 0f, heading, 0f), null
+                        )
+                    }
+
+
+                }
+
+                Thread.sleep(40)
+                cycleTime = System.currentTimeMillis() - start
+                Log.i(TAG, "Cycle time: $cycleTime")
+
+            }
+
+
+        }
+    }
+
+
+    /*Starts a new thread responsible for running inference in the image data retrieved from the drones video feed*/
     private fun startObjectDetection() {
 
-        cameraExecutor.execute {
+        inferenceExecutor.execute {
             while (true) {
 
                 if (!shouldDetectObjects) {
@@ -300,14 +728,67 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
     }
 
 
-    // Update UI after objects have been detected. Extracts original image height/width
-    // to scale and place bounding boxes properly through OverlayView
+    /*
+        Overridden inherited method called every time the object detector helper has a new result
+        If we have set a tracked object the algorithm will go though all detections and check if
+
+
+
+    Also invalidates the old overlay to force a redraw with the updated object predictions
+
+     */
     override fun onResults(
         results: MutableList<Detection>?,
         inferenceTime: Long,
         imageHeight: Int,
         imageWidth: Int
     ) {
+
+        //detectionResults?:return
+        detectionResults = results
+
+
+        val overlay: OverlayView = findViewById(R.id.overlay)
+        if (overlay.trackedObject != null) {
+
+            var closesDistance: Double = 10.0.pow(10)
+            var optimalCandidate: Detection? = null
+
+            for (detection in detectionResults!!) {
+
+                val pixelDistanceToTarget: Double = sqrt(
+                    ((detection.boundingBox.centerX() - overlay.trackedObject!!.boundingBox.centerX()).toDouble()
+                        .pow(2.0)) + ((detection.boundingBox.centerY() - overlay.trackedObject!!.boundingBox.centerY()).toDouble()
+                        .pow(2.0))
+                )
+                if (pixelDistanceToTarget < closesDistance && detection.categories[0].label == overlay.trackedObject!!.categories[0].label) {
+                    closesDistance = pixelDistanceToTarget
+                    optimalCandidate = detection
+                }
+
+            }
+
+            if (optimalCandidate == null || closesDistance > 200) {
+
+                // Do nothing
+                hasLostTarget = true
+
+            } else {
+                overlay.trackedObject = optimalCandidate
+
+                hasLostTarget = false
+
+                // In case we want to use a rolling average
+                trackedObjectLastLocations.add(optimalCandidate)
+                if (trackedObjectLastLocations.size > 5) {
+                    trackedObjectLastLocations.removeFirst()
+                }
+            }
+
+
+        }
+
+        // Instruct the UI thread to re-render
         runOnUiThread {
 
 
@@ -315,19 +796,21 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
             textView.text = String.format("%d ms", inferenceTime)
 
             // Pass necessary information to OverlayView for drawing on the canvas
-            val overlay: OverlayView = findViewById(R.id.overlay)
             //Log.i(TAG, "results: $results")
-            results?.removeIf { detection -> detection.categories[0].label != "person" }
+            // n      m, results?.removeIf { detection -> detection.categories[0].label != "person" }
+
             overlay.setResults(
                 results ?: LinkedList<Detection>(),
                 imageHeight,
                 imageWidth
             )
 
+
             // Force a redraw
             overlay.invalidate()
         }
     }
+
 
     // Function that uninitializes the display for the videoSurface TextureView
     private fun uninitPreviewer() {
@@ -380,114 +863,81 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
     // Handling what happens when certain layout views are clicked
     override fun onClick(v: View?) {
         when (v?.id) {
-
-            // R.id.takeOffBtn -> {
-            //     (getProductInstance() as Aircraft).flightController?.let { flightController ->
-            //         flightController.startTakeoff { err ->
-            //             if (err != null) {
-            //                 Log.i(TAG, "${err.description}")
-            //                 showToast("Error taking off")
-            //             } else {
-            //                 showToast("Taking off")
-
-            //             }
-            //         }
-
-            //     }
-            // }
-
             R.id.inference_button -> {
-
-
                 shouldDetectObjects = !shouldDetectObjects
                 when (shouldDetectObjects) {
 
                     true -> {
+
+                        //startFollow()
                         Log.i(TAG, "Starting inference process")
                         detectBtn.text = "Stop"
+                        (getProductInstance() as Aircraft).flightController.setVirtualStickModeEnabled(
+                            true,
+                            null
+                        )
+
+                        shouldFollow = true
                         startObjectDetection()
+                        startFollowingObject()
+                        distanceToTargetGroup.isVisible = true
+                        /*distanceToTargetGroup.visibility = View.VISIBLE*/
 
                     }
                     false -> {
-                        Log.i(TAG, "Stopping inference process")
-                        detectBtn.text = "Detect"
-                        val overlay: OverlayView = findViewById(R.id.overlay)
-
-                        overlay.clearResults()
-                        overlay.invalidate()
-
-
+                        stopFollow()
                     }
 
                 }
 
             }
-            R.id.LandBtn -> {
-                (getProductInstance() as Aircraft).flightController?.let { flightController ->
-                    flightController.startLanding { err ->
-                        if (err != null) {
-                            Log.i(TAG, "Error starting landing ${err.description}")
-                            showToast("Error starting landing")
-                        } else {
-                            showToast("Landing started")
-                        }
-                    }
-                }
-            }
-            else -> {}
+
         }
     }
 
-    // Function for taking a a single photo using the DJI Product's camera
-    private fun captureAction() {
-        val camera: Camera = getCameraInstance() ?: return
+    private fun startFollow() {
 
-        /*
-        Setting the camera capture mode to SINGLE, and then taking a photo using the camera.
-        If the resulting callback for each operation returns an error that is null, then the
-        two operations are successful.
-        */
-        val photoMode = ShootPhotoMode.SINGLE
-        camera.setShootPhotoMode(photoMode) { djiError ->
-            if (djiError == null) {
-                lifecycleScope.launch {
-                    camera.startShootPhoto { djiErrorSecond ->
-                        if (djiErrorSecond == null) {
-                            showToast("take photo: success")
-                        } else {
-                            showToast("Take Photo Failure: ${djiError?.description}")
-                        }
-                    }
-                }
-            }
+        Log.i(TAG, "Starting inference process")
+        detectBtn.text = "Stop"
+        (getProductInstance() as Aircraft).flightController.setVirtualStickModeEnabled(true, null)
+
+        shouldFollow = true
+
+        startObjectDetection()
+        startFollowingObject()
+        distanceToTargetGroup.isVisible = true
+        //distanceToTargetGroup.visibility = View.VISIBLE
+    }
+
+    private fun stopFollow() {
+        (getProductInstance() as Aircraft).flightController.setVirtualStickModeEnabled(false, null)
+
+        getAircraftInstance().gimbal.reset(Axis.YAW, ResetDirection.CENTER, null)
+
+
+        Log.i(TAG, "Stopping inference process")
+        detectBtn.text = "Detect"
+        val overlay: OverlayView = findViewById(R.id.overlay)
+        overlay.trackedObject = null
+        shouldFollow = false
+        shouldDetectObjects = false
+        Timer().schedule(100) {
+            overlay.clearResults()
+            overlay.clear()
+            overlay.invalidate()
+            //distanceToTargetGroup.isVisible = false
+            //distanceToTargetGroup.visibility = View.INVISIBLE
         }
     }
 
-    /*
-    Function for setting the camera mode. If the resulting callback returns an error that
-    is null, then the operation was successful.
-    */
-    private fun switchCameraMode(cameraMode: CameraMode) {
-        val camera: Camera = getCameraInstance() ?: return
-
-        camera.setMode(cameraMode) { error ->
-            if (error == null) {
-                showToast("Switch Camera Mode Succeeded")
-            } else {
-                showToast("Switch Camera Error: ${error.description}")
-            }
-        }
-    }
-
-    /*
-    Note:
-    Depending on the DJI product, the mobile device is either connected directly to the drone,
-    or it is connected to a remote controller (RC) which is then used to control the drone.
-    */
 
     // Function used to get the DJI product that is directly connected to the mobile device
     private fun getProductInstance(): BaseProduct? {
         return DJISDKManager.getInstance().product
+    }
+
+    private fun getAircraftInstance(): Aircraft {
+        return getProductInstance() as Aircraft
     }
 
     /*
@@ -535,15 +985,18 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
         if (videoWidth == null || videoHeight == null) {
             return null
         }
+
         val imageData: ByteArray = codecManager?.getRgbaData(videoWidth, videoHeight) ?: return null
+
         val bmp: Bitmap = Bitmap.createBitmap(videoWidth, videoHeight, Bitmap.Config.ARGB_8888)
         val buffer: ByteBuffer = ByteBuffer.wrap(imageData)
         bmp.copyPixelsFromBuffer(buffer)
-        val size: Int = 10
+
         return bmp
         //saveImage(bmp, this@MainActivity, "ODaT")
 
 
+        // Code to get RGB values from a bitmap
         /**
          * launch {
         // val pixels = IntArray(bmp.width * bmp.height)
@@ -588,6 +1041,7 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
     }
 
 
+    // Saves a given bitmap to the device's local storage (images) under the folderName folder
     private fun saveImage(bitmap: Bitmap, context: Context, folderName: String) {
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             val values = contentValues()
@@ -641,5 +1095,6 @@ class MainActivity : AppCompatActivity(), TextureView.SurfaceTextureListener, Vi
             }
         }
     }
+
 }
 

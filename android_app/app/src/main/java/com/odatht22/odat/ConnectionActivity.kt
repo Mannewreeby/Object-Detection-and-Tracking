@@ -3,8 +3,10 @@ package com.odatht22.odat
 import android.Manifest
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.graphics.Color
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.util.Log
 import android.view.Window
 import android.view.WindowManager
 import android.widget.Button
@@ -27,6 +29,7 @@ class ConnectionActivity : AppCompatActivity() {
     private lateinit var mTextModelAvailable: TextView
     private lateinit var mBtnOpen: Button
     private lateinit var mVersionTv: TextView
+    private lateinit var connectBtn: Button
 
     private val model: ConnectionViewModel by viewModels() //linking the activity to a viewModel
 
@@ -40,17 +43,11 @@ class ConnectionActivity : AppCompatActivity() {
 
     }
 
-    //Creating the Activity
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        //inflating the activity_connection.xml layout as the activity's view
-        setContentView(R.layout.activity_connection)
-
+    private fun requestPermissions(){
         /*
-        Request the following permissions defined in the AndroidManifest.
-        1 is the integer constant we chose to use when requesting app permissions
-        */
+      Request the following permissions defined in the AndroidManifest.
+      1 is the integer constant we chose to use when requesting app permissions
+      */
         ActivityCompat.requestPermissions(this,
             arrayOf(
                 Manifest.permission.WRITE_EXTERNAL_STORAGE,
@@ -68,10 +65,24 @@ class ConnectionActivity : AppCompatActivity() {
                 Manifest.permission.READ_PHONE_STATE
             ), 1)
 
-        //Initialize the UI, register the app with DJI's mobile SDK, and set up the observers
-        initUI()
         model.registerApp()
         observers()
+    }
+
+    //Creating the Activity
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        //inflating the activity_connection.xml layout as the activity's view
+        setContentView(R.layout.activity_connection)
+
+
+        initUI()
+
+        requestPermissions()
+
+        //Initialize the UI, register the app with DJI's mobile SDK, and set up the observers
+
     }
 
     //Function to initialize the activity's UI
@@ -83,11 +94,12 @@ class ConnectionActivity : AppCompatActivity() {
         mTextProduct = findViewById(R.id.text_product_info)
         mBtnOpen = findViewById(R.id.btn_open)
         mVersionTv = findViewById(R.id.textView2)
+        connectBtn = findViewById(R.id.btn_permissions)
 
         //Getting the DJI SDK version and displaying it on mVersionTv TextView
         mVersionTv.text = resources.getString(R.string.sdk_version, DJISDKManager.getInstance().sdkVersion)
 
-        mBtnOpen.isEnabled = true //mBtnOpen Button is initially disabled
+        mBtnOpen.isEnabled = false //mBtnOpen Button is initially disabled
 
         //If mBtnOpen Button is clicked on, start MainActivity (only works when button is enabled)
         mBtnOpen.setOnClickListener {
@@ -97,6 +109,13 @@ class ConnectionActivity : AppCompatActivity() {
             startActivity(intent)
 
         }
+
+        connectBtn.setOnClickListener {
+            requestPermissions()
+            Log.i(TAG, "Requesting permissions")
+        }
+
+
 
     }
 
@@ -110,10 +129,11 @@ class ConnectionActivity : AppCompatActivity() {
             if (isConnected) {
                 mTextConnectionStatus.text = "Status: Connected"
                 mBtnOpen.isEnabled = true
+                mBtnOpen.setBackgroundColor(Color.GREEN)
             }
             else {
                 mTextConnectionStatus.text = "Status: Disconnected"
-                mBtnOpen.isEnabled = true
+                mBtnOpen.isEnabled = false
             }
         })
 
